@@ -1,0 +1,1312 @@
+---
+title: "SID510288769 Assignment"
+author: "510288769"
+format: 
+  html: 
+    self-contained: true # Creates a single HTML file as output
+    code-fold: true # Code folding; allows you to show/hide code chunks
+    code-tools: true # Includes a menu to download the code file
+number-sections: true # (Optional) Puts numbers next to heading/subheadings
+---
+
+```{r, message=FALSE, results = 'hide'}
+library(tidyverse)
+library(maps)
+library(ggplot2)
+library(plotly)
+library(ggmap)
+library(limma)
+library(dplyr)
+library(stringr)
+library(viridis)
+library(reshape2)
+library(R.utils)
+library(GEOquery) 
+library(data.table)
+library(crosstalk)
+library(plotly)
+library(leaflet)
+library(leafpop)
+library(plotly)
+library(leaflet.extras)
+library(preprocessCore)
+library(tidyverse)
+library(tuneR)
+library(devtools)
+library(ggplot2)
+library(tsfeatures)
+library(stringdist)
+```
+
+# Reef Case Study
+
+```{r}
+reef <- read.csv("data/Reef_Check_with_cortad_variables_with_annual_rate_of_SST_change.csv") 
+names(reef)[names(reef) == 'Average_bleaching'] <- 'Average Bleaching'
+
+```
+
+## Visualising Coral Bleaching
+
+```{r,fig.width=16, message=FALSE}
+reef_bleaching = aggregate(reef$`Average Bleaching`, by=list(Name=reef$Reef.Name, Latitude.Degrees = reef$Latitude.Degrees, Longitude.Degrees = reef$Longitude.Degrees),data=reef,FUN=mean) %>% data.frame()
+
+colnames(reef_bleaching)[4] = 'Average Bleaching (%)'
+
+n_trop = filter(reef_bleaching, between(reef_bleaching$Latitude.Degrees, 15, 20))
+s_trop = filter(reef_bleaching, between(reef_bleaching$Latitude.Degrees, -20, -15))
+trop = rbind(n_trop, s_trop)
+trop$mid_tropical = 'Tropical Area'
+
+non_trop = anti_join(reef_bleaching, trop)
+non_trop$mid_tropical = 'Non-tropical Area'
+reef_bleaching = rbind(trop, non_trop)
+world_map <- map_data("world")
+p = ggplot()+  geom_map(
+    dat = world_map, map = world_map, aes(map_id = region),
+    fill = "white", color = "#7f7f7f", linewidth = 0.25) +
+  geom_point(data = reef_bleaching, aes(y=Latitude.Degrees, x= Longitude.Degrees, alpha = `Average Bleaching (%)`, color =as.factor(mid_tropical)), size = 2)  +
+  scale_color_manual(name = "Location of Corals Bleaching", 
+    values = c("blue", "red")) + 
+  geom_hline(yintercept= c(15, 20, -15, -20), linetype=2) + 
+  scale_y_continuous(name="Latitude", breaks = c(0, 10, 20, 30, 40, -10, -20, -30, -40, 50, 60, 70), limits=c(-35,35)) +
+  xlab("Longitude") +
+  coord_fixed() + 
+  theme(legend.position = "bottom") + ggtitle("World Map of Average Bleaching (%)")
+p
+```
+
+### Graph Analysis
+
+In the graph above, we can see that the level of transparency of each points is correlated to the percentage of bleaching where a more opaque point represents a high average bleaching throughout all the years from which the data is collected. Here, we are interested in comparing the blue dots, which represents coral bleaching outside of the tropical mid-latitude area, with red dots, which represents the tropical mid-latitude area. Thus, it can seen that the evidence doesn't really support the author claims in what the highest probability of coral bleaching occurred at tropical mid-latitudes sites. This is because in the left side of the world map, near South East Asia, there seem to be a lot of bleaching outside of the tropical mid-latitude area, compared to the region of interest. However, if we only focus on the left side of the map, near the US, we can see that there seem to be a higher level of average of bleaching in the tropical mid-latitude area compared to the non-tropical mid-latitude area, so we can say that the left side of the map contains data that supports the author claim should we only focus on that particular area. However, looking at the map with a holistic view, there seems to be more bleaching outside of the tropical mid-latitude area, thus the author claims are not supported.
+
+## Interactive Map for Average Bleaching
+
+```{r, message= FALSE, fig.cap= "An interactive world map with filter sliders for years and average bleaching (%)"}
+library(htmltools)
+reefdf = aggregate(reef$`Average Bleaching`, by=list(Name=reef$Reef.Name, Latitude.Degrees = reef$Latitude.Degrees, Longitude.Degrees = reef$Longitude.Degrees, Year = reef$Year),data=reef,FUN=mean) %>% data.frame()
+colnames(reefdf)[5] = 'Average Bleaching (%)'
+colnames(reefdf)[1] = "Reef Name"
+colnames(reefdf)[2] = 'Lat'
+colnames(reefdf)[3] = 'Long'
+
+reefdf$`Average Bleaching (%)` <- round(reefdf$`Average Bleaching (%)`, 2)
+
+
+sd <- SharedData$new(reefdf)
+
+pal <- colorNumeric(palette = "viridis", domain = reefdf$`Average Bleaching (%)`)
+
+bscols(div(style = css(width="100%", height="400px", background_color="white")),
+  widths = c(1, 3, NA),
+  list(filter_slider("Year", "Year", sd, column=~Year, step=1, sep = NA, width = '100%'), 
+       filter_slider("Average Bleaching (%)", "Average Bleaching (%)", sd, ~`Average Bleaching (%)`, width = "100%")),
+            
+  leaflet(sd) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addCircleMarkers(lng = ~Long, lat = ~Lat, stroke = FALSE, radius = 5, 
+                   color = ~pal(`Average Bleaching (%)`), fillOpacity = 0.3,        
+                   popup = ~leafpop::popupTable(reefdf,
+                                       zcol = c("Reef Name", "Average Bleaching (%)", "Year"),
+                                       row.numbers = FALSE, feature.id = FALSE)) %>%
+  addLegend(position = "bottomright", pal = pal, values = ~`Average Bleaching (%)`, opacity = 1))
+```
+
+### Choice of Visualisation
+
+In the interactive map above, we can see that there are two sliders that are applied to represent the Year and the level of average bleaching. This was chosen as it made it easier to filter data throughout a specific year or range of years. Moreover, the slider for average bleaching was implemented as the data included lots of sites where average bleaching was 0%, thus can make the map look too clustered to pull out important information. An additional componenet that was implemented into this graph was the name of the reed, the level of average bleaching and the year in which it is recorded which can be access by clicking a point.
+
+### Graph Analysis 
+
+By setting the level of average bleaching to be in the 30-100% range, and setting the year filter to look at 1998 only, we can pull the right side of the filter to show how the level average bleaching changes from 1998 to eventually the whole 1998-2017 range. We can see that there is high number of sites near US from 1998 to 2006 with a level of bleach from 30-100%. However, throughout the years, from 1998 to 2017, we can see that the there is a large number of sites where the average level of bleach from 30-100% that started to appear near the South East Asia region and Australia.
+
+# Kidney Case Study
+
+```{r, message= FALSE}
+load("data/GSE46474.RData")
+gse4 = gse
+emat4 = exprs(gse4)
+
+load("data/GSE138043.RData")
+gse1 = gse
+emat1_og = exprs(gse1)
+emat1 = exprs(gse1)
+emat1 =  normalize.quantiles(exprs(gse1))
+colnames(emat1) = c(colnames(emat1_og))
+rownames(emat1) = c(rownames(emat1_og))
+
+gse4$Outcome <- ifelse(grepl("AR", gse4$title), "Rejection", "Stable")
+pdata4 = pData(gse4)
+
+gse1$Outcome <- ifelse(grepl("non-AR", gse1$characteristics_ch1), "Stable", "Rejection")
+pdata1 = pData(gse1)
+
+fdata4=fData(gse4)
+fdata4$gene_name = stringr::str_split_i(fdata4$`Gene Symbol`, " /// ", 1)
+
+fdata1 = fData(gse1)
+fdata1$gene_name = stringr::str_split_i(fdata1$gene_assignment, " // ", 2)
+
+
+design4 <- model.matrix(~Outcome, data = pdata4)
+fit4 <- lmFit(emat4, design4) %>% eBayes()
+tT4 <- topTable(fit4, genelist=fdata4$gene_name, n=300)
+
+design1 <- model.matrix(~Outcome, data = pdata1)
+fit1 <- lmFit(emat1, design1) %>% eBayes()
+tT1 <- topTable(fit1, genelist=fdata1$gene_name, n=300)
+
+tT4$sig = factor(tT4$adj.P.Val < 0.05, levels = c(TRUE, FALSE), labels = c("Significant", "Not significant"))
+tT1$sig = factor(tT1$adj.P.Val < 0.05, levels = c(TRUE, FALSE), labels = c("Significant", "Not significant"))
+
+
+```
+
+## Visualising Top 300 Gene Expressions 
+
+```{r}
+p1 = plot_ly(data = tT4,
+            x = ~AveExpr,
+            y = ~logFC,
+            color = ~sig,
+            colors = c("red", "blue"),
+            alpha = 0.7,
+            type = "scatter",
+            mode = "markers",
+            text = ~ID,
+            legendgroup = ~sig,
+            hoverinfo = 'text')
+
+
+p2 = plot_ly(data = tT4,
+             x = ~logFC,
+             y = ~-log10(P.Value),
+             color = ~sig,
+             colors = c("red", "blue"),
+             alpha = 0.7,
+             type = "scatter",
+             mode = "markers",
+             text = ~ID,
+             legendgroup = ~sig,
+             showlegend = F,
+             hoverinfo = "text")
+
+
+fig <- subplot(p1, p2, nrows = 1, titleY = TRUE, titleX = TRUE, margin = 0.1)
+fig%>% layout(title = 'An interactive Minus-Add (left) and Volcano (right) plot of GSE46474')
+
+
+```
+
+```{r}
+p3 = plot_ly(data = tT1,
+            x = ~AveExpr,
+            y = ~logFC,
+            color = ~sig,
+            colors = c("red", "blue"),
+            alpha = 0.7,
+            type = "scatter",
+            mode = "markers",
+            text = ~ID,
+            legendgroup = ~sig,
+            hoverinfo = 'text')
+
+p4 = plot_ly(data = tT1,
+             x = ~logFC,
+             y = ~-log10(P.Value),
+             color = ~sig,
+             colors = c("red", "blue"),
+             alpha = 0.7,
+             type = "scatter",
+             mode = "markers",
+             text = ~ID,
+             legendgroup = ~sig,
+             showlegend = F,
+             hoverinfo = "text")
+
+
+fig <- subplot(p3, p4, nrows = 1, titleY = TRUE, titleX = TRUE, margin = 0.1)
+fig%>% layout(title = 'An interactive Minus-Add (left) and Volcano (right) plot of GSE138043')
+
+```
+
+## Overlapping Genes from Top 300 genes
+
+```{r}
+common1 <- intersect(tT4$ID, tT1$ID) %>% data.frame()  
+colnames(common1)  <- "Top 300 differentially expressed genes found in both dataset"    
+
+knitr::kable(common1)
+```
+
+## CV for Framework A
+
+```{r, message=FALSE}
+
+#design1 <- model.matrix(~Outcome, data = pdata1)
+#fit1 <- lmFit(emat1, design1) %>% eBayes()
+library(plotly)
+set.seed(3888)
+# 
+# load("GSE46474.RData")
+# gse4 = gse
+# emat4 = exprs(gse4)
+# 
+# load("GSE138043.RData")
+# gse1 = gse
+# emat1_og = exprs(gse1)
+# emat1 = exprs(gse1)
+# emat1 =  normalize.quantiles(exprs(gse1))
+# colnames(emat1) = c(colnames(emat1_og))
+# rownames(emat1) = c(rownames(emat1_og))
+# 
+# gse4$Outcome <- ifelse(grepl("AR", gse4$title), "Rejection", "Stable")
+# pdata4 = pData(gse4)
+# 
+# gse1$Outcome <- ifelse(grepl("non-AR", gse1$characteristics_ch1), "Stable", "Rejection")
+# pdata1 = pData(gse1)
+
+tT1_50 = topTable(fit1, n=50)
+id_1 = rownames(tT1_50)
+X1 = as.matrix(t(emat1[id_1,]))
+y1 = gse1$Outcome
+
+cvK = 5  # number of CV folds
+n_sim = 50 ## number of repeats
+
+cv_50acc5_svm_1 = c()
+cv_acc_svm_1 = c()
+for (i in 1:n_sim) {
+  cvSets = cvTools::cvFolds(nrow(X1), cvK)  # permute all the data, into 5 folds
+  cv_acc_svm_1 = c()
+  for (j in 1:cvK) {
+    test_id = cvSets$subsets[cvSets$which == j]
+    X_test_1a = X1[test_id, ]
+    X_train_1a = X1[-test_id, ]
+    y_test_1a = y1[test_id]
+    y_train_1a = y1[-test_id]
+    ## SVM
+    svm_res <- e1071::svm(x = X_train_1a, y = as.factor(y_train_1a))
+    fit <- predict(svm_res, X_test_1a)
+    cv_acc_svm_1[j] = mean(fit == y_test_1a)
+
+  }
+  cv_50acc5_svm_1 <- append(cv_50acc5_svm_1, mean(cv_acc_svm_1))
+}
+
+
+tT4_50 = topTable(fit4, n=50)
+id_4 = rownames(tT4_50)
+X4 = as.matrix(t(emat4[id_4,]))
+y4 = gse4$Outcome
+
+cv_50acc5_svm_4 = c()
+cv_acc_svm_4 = c()
+for (i in 1:n_sim) {
+  cvSets = cvTools::cvFolds(nrow(X4), cvK)  # permute all the data, into 5 folds
+  cv_acc_svm_4 = c()
+  for (j in 1:cvK) {
+    test_id = cvSets$subsets[cvSets$which == j]
+    X_test_4a = X4[test_id, ]
+    X_train_4a = X4[-test_id, ]
+    y_test_4a = y4[test_id]
+    y_train_4a = y4[-test_id]
+    ## SVM
+    svm_res <- e1071::svm(x = X_train_4a, y = as.factor(y_train_4a))
+    fit <- predict(svm_res, X_test_4a)
+    cv_acc_svm_4[j] = mean(fit == y_test_4a)
+
+  }
+  cv_50acc5_svm_4 <- append(cv_50acc5_svm_4, mean(cv_acc_svm_4)) 
+}
+
+#boxplot(list(SVM_1 = cv_50acc5_svm_1, SVM_4 = cv_50acc5_svm_4), ylab="CV Accuracy")
+
+svm4a = cbind(cv_50acc5_svm_4, "GSE46474 (Blood)", "A")
+svm4b = cbind(cv_50acc5_svm_1, "GSE138043 (Biopsy)", "A")
+
+dfa = rbind(svm4a, svm4b) %>% as.data.frame()
+colnames(dfa) = c("CV_acc", "Dataset", "Framework")
+dfa[,1] = dfa[,1] %>% as.numeric()
+p = ggplot(data = dfa, aes(y = CV_acc, x = Dataset, color = Dataset)) + geom_boxplot(outlier.shape = NA) + geom_jitter(position=position_jitter(0.2)) + ylab("CV Accuracy") + ggtitle("An interative boxplot of CV accuracy from Framework A")
+ggplotly(p)
+```
+
+### Framework A Analysis
+
+Overall, we can see that the GSE45474 dataset has a higher level of accuracy with 50 repeats of a 5 fold CV, where the average CV accuracy value is 0.95. This means that the support vector machine (SVM) algorithm was able to correctly predict the outcome of "stable" and "rejection" for 95% of the data set. On the other hand, the GSE138043 dataset had a lower average CV accuracy of 0.903, which represents that the SVM algorithm was able to predict 90.3% of the outcomes for each observation correctly. Given the fact that GSE45474 represents the rejection/stable rates for kidney blood, we can say that it provides a higher prediction accuracy than the biopsy biomarker, which is represented by GSE138043 using Framework A. Visually, the kidney blood dataset had no variability as most of the points lie on an accuracy of 95%, whereas the biospy biomarker had a larger variance.
+
+## CV for Framework B
+
+```{r, message=FALSE}
+# load("GSE46474.RData")
+# gse4 = gse
+# emat4 = exprs(gse4)
+# 
+# load("GSE138043.RData")
+# gse1 = gse
+# emat1_og = exprs(gse1)
+# emat1 = exprs(gse1)
+# emat1 =  normalize.quantiles(exprs(gse1))
+# colnames(emat1) = c(colnames(emat1_og))
+# rownames(emat1) = c(rownames(emat1_og))
+# 
+# gse4$Outcome <- ifelse(grepl("AR", gse4$title), "Rejection", "Stable")
+# pdata4 = pData(gse4)
+# 
+# gse1$Outcome <- ifelse(grepl("non-AR", gse1$characteristics_ch1), "Stable", "Rejection")
+# pdata1 = pData(gse1)
+
+
+cvK = 5
+n_sim = 50
+cv_50acc5_svm_4_b = c()
+X4b = as.matrix(t(emat4))
+for (i in 1:n_sim) {
+  cvSets = cvTools::cvFolds(nrow(X4b), cvK)  # permute all the data, into 5 folds
+   cv_acc_svm_4_b = c()
+  for (j in 1:cvK) {
+    test_id = cvSets$subsets[cvSets$which == j]
+    X_train_4b = X4b[-test_id, ]
+    observation = c(rownames(X_train_4b))
+    new_pdata4 = filter(pdata4, geo_accession %in% observation)
+    new_design4 <- model.matrix(~Outcome, data = new_pdata4) #[1:32, 1:2]
+    t_X_train_4b = t(X_train_4b)
+    fit4 <- lmFit(t_X_train_4b, new_design4) %>% eBayes() #Fitted to training data set that was split 80/20
+    tT4b_50 <- topTable(fit4, n=50)
+    gene_id = c(rownames(tT4b_50)) 
+    X_train_50_4b = X_train_4b[,gene_id] #Filters 32 observations with 50 top genes features
+    X_test_4b = X4b[test_id, ] #Filters 8 observations with all features so matrix is 8X54613
+    X_test_50_4b = X_test_4b[,gene_id] #Filters all features down to 50 top genes so matrix is 8x50
+    y_test_50_4b = pdata4[test_id,]$Outcome #Filters the 8 testing data outcomes
+    y_train_50_4b = new_pdata4$Outcome #Filters outcomes from training data: 32 observations
+    svm_res <- e1071::svm(x = X_train_50_4b, y = as.factor(y_train_50_4b))
+    fit <- predict(svm_res, X_test_50_4b)
+    cv_acc_svm_4_b[j] = mean(fit == y_test_50_4b)
+  }
+  cv_50acc5_svm_4_b <- append(cv_50acc5_svm_4_b, mean(cv_acc_svm_4_b))
+  }
+
+
+cv_50acc5_svm_1_b = c()
+X1b = as.matrix(t(emat1))
+for (i in 1:n_sim) {
+  cvSets = cvTools::cvFolds(nrow(X1b), cvK)  # permute all the data, into 5 folds
+  cv_acc_svm_1_b = c()
+  for (j in 1:cvK) {
+    test_id = cvSets$subsets[cvSets$which == j]
+    X_train_1b = X1b[-test_id, ]
+    observation = c(rownames(X_train_1b))
+    new_pdata1 = filter(pdata1, geo_accession %in% observation)
+    new_design1 <- model.matrix(~Outcome, data = new_pdata1) #[1:32, 1:2]
+    t_X_train_1b = t(X_train_1b)
+    fit1 <- lmFit(t_X_train_1b, new_design1) %>% eBayes() #Fitted to training data set that was split 80/20
+    tT1b_50 <- topTable(fit1, n=50)
+    gene_id = c(rownames(tT1b_50)) 
+    X_train_50_1b = X_train_1b[,gene_id] #Filters 32 observations with 50 top genes features
+    X_test_1b = X1b[test_id, ] #Filters 8 observations with all features so matrix is 8X54613
+    X_test_50_1b = X_test_1b[,gene_id] #Filters all features down to 50 top genes so matrix is 8x50
+    y_test_50_1b = pdata1[test_id,]$Outcome #Filters the 8 testing data outcomes
+    y_train_50_1b = new_pdata1$Outcome #Filters outcomes from training data: 32 observations
+    svm_res <- e1071::svm(x = X_train_50_1b, y = as.factor(y_train_50_1b))
+    fit <- predict(svm_res, X_test_50_1b)
+    cv_acc_svm_1_b[j] = mean(fit == y_test_50_1b)
+  }
+  cv_50acc5_svm_1_b <- append(cv_50acc5_svm_1_b, mean(cv_acc_svm_1_b))
+}
+
+svm4b = cbind(cv_50acc5_svm_4_b, "GSE46474 (Blood)", "B")
+svm1b = cbind(cv_50acc5_svm_1_b, "GSE138043 (Biopsy)", "B")
+
+dfb = rbind(svm4b, svm1b) %>% as.data.frame()
+colnames(dfb) = c("CV_acc", "Dataset", "Framework")
+dfb[,1] = dfb[,1] %>% as.numeric()
+p = ggplot(data = dfb, aes(y = CV_acc, x = Dataset, color = Dataset)) + geom_boxplot(outlier.shape = NA) + geom_jitter(position=position_jitter(0.2)) + ylab("CV Accuracy") + ggtitle("An interative boxplot of CV accuracy from Framework B")
+ggplotly(p)
+```
+
+### Framework B Analysis
+
+For framework B, we can see that the GSE138043 dataset had around the same level of accuracy compared to GSE46474 which was 0.825. This depicts that the SVM algorithm on both the kidney and blood biopsy datasets had a 82.5% rate of predicting the correct outcome of whether a graft had been rejected or stable in the observations. Visually, we can see that the boxplot for GSE46474 had a larger variance than GSE138043. This means that there is a wider spread of CV accuracy for GSE46474, thus indicating that there is more variability when using blood to predict outcomes compared to using the biopsy.
+
+## Framework Comparasion
+
+```{r}
+df_combined = rbind(dfa, dfb)
+p1 <- ggplot(df_combined, aes(x=Framework, y=CV_acc, color=Dataset)) + 
+    geom_boxplot(outlier.shape = NA) +
+    facet_wrap(~Dataset) + geom_jitter(position=position_jitter(0.2), alpha = 0.5) + ylab("CV Accuracy") + ggtitle("Interactive boxplots of CV accuracy from framework A and B")
+
+# p = ggplot(data = df_combined, aes(y = CV_acc, x = Dataset, color = Framework)) + geom_boxplot() + ylab("CV Accuracy") 
+ggplotly(p1)
+
+```
+Based on the accuracy metric, the GSE46474 had higher accuracy in both frameworks. Moreover, GSE138043 had a larger spread of data in framework A compared to GSE46474, thus GSE46474 would a better dataset to rely on.
+
+Framework A follows regular cross validation framework where the same data is used for testing and training thus is prone to overfitting so the results can often be optimistic making it an unreliable estimate for performance generalisation after deployment dealing with future data. However, framework B follows a nested cross validation framework which trains the model is a more realistic way by having an outer loop that splits data into training and testing datasets, as well as an inner loop that tunes hyperparameters. The inner loop helps limit the issue of overfitting,  thus allows framework B to provide more accurate estimate of the model’s performance. 
+
+
+# Brain-box Case Study
+
+```{r}
+dir_short <- "data/zoe_spiker/Length3"
+all_files_short <- list.files(dir_short)
+
+wave_file_short <- list()
+for (i in all_files_short) {
+  wave_file_short[[i]] <- tuneR::readWave(file.path(dir_short, i))
+}
+
+dir_med <- "data/zoe_spiker/Length8"
+all_files_med <- list.files(dir_med
+                            )
+wave_file_med <- list()
+for (i in all_files_med) {
+  wave_file_med[[i]] <- tuneR::readWave(file.path(dir_med, i))
+}
+
+dir_long <- "data/zoe_spiker/Long"
+all_files_long <- list.files(dir_long)
+
+wave_file_long <- list()
+for (i in all_files_long) {
+  wave_file_long[[i]] <- tuneR::readWave(file.path(dir_long, i))
+}
+
+labels = names(wave_file_short) 
+labels <- substring(labels, 1, 3)
+Y_lab = labels
+Y_lab = Y_lab %>% list()
+
+labels_8 = names(wave_file_med) 
+labels_8 <- substring(labels_8, 1, 8)
+Y_lab_8 = labels_8
+Y_lab_8 = Y_lab_8 %>% list()
+
+labels_20 = names(wave_file_long) 
+labels_20 <- substring(labels_20, 1, 20)
+Y_lab_20 = labels_20
+Y_lab_20 = Y_lab_20 %>% list()
+```
+
+## Model for determining events that are left/right eye movements in windows
+
+```{r, warning=FALSE}
+library(dplyr)
+eye_movement_sd = function(waveSeq,  
+                        window_size = waveSeq@samp.rate,
+                        increment = window_size/5,
+                        threshold_events = 400){
+
+Y = waveSeq@left
+xtime = seq_len(length(waveSeq@left))/waveSeq@samp.rate
+sd_signal = c()
+event_time_interval = matrix(c(NA, NA), ncol = 2) 
+# colnames(event_time_interval) = c("start", "stop")
+lower_interval = 1
+max_time = max(xtime)*window_size
+movement_LR = c()
+expecteded_row = 0 #number of rows in overlapped table
+int_value = tibble()
+stop_value = tibble()
+start_value = tibble()
+move = matrix()
+end_nrow = 0
+
+
+while(max_time > lower_interval + window_size) {
+    upper_interval = lower_interval + window_size  %>% floor()#1ms + 1sec = 10001
+    midpoint = (lower_interval + upper_interval)/2
+    Y_subset = Y[lower_interval:upper_interval] 
+    sd = sd(Y_subset)
+    if (sd > threshold_events) {
+        event_time_interval = rbind(event_time_interval, c(stop = upper_interval, start = lower_interval))
+        event_time_interval = event_time_interval %>% data.frame()
+        event_time_interval = event_time_interval %>% na.omit()
+        ##Overlap combined
+        event_time_interval = event_time_interval %>%
+        arrange(start) %>%
+        group_by(g = cumsum(cummax(lag(stop, default = dplyr::first(stop))) < start)) %>%
+        summarise(start = first(start), stop = max(stop))
+        end_nrow = nrow(event_time_interval)
+    }
+    if (end_nrow != expecteded_row) {#Finding a new event 
+      event_time_interval$stop_times <- as.character(event_time_interval$stop)
+      stop_time <- strsplit(event_time_interval$stop_times, " ")
+      stop_value = cbind(stop_time) %>% as.numeric()
+      
+      event_time_interval$start_times <- as.character(event_time_interval$start)
+      start_time <- strsplit(event_time_interval$start_times, " ")
+      start_value = cbind(start_time) %>% as.numeric()
+      int_value = cbind(start_value, stop_value)
+      
+      for (j in 1:max(nrow(int_value))){ #Finding whether it's left or right movement
+        Y_val = Y[int_value[j,1]: int_value[j,2]]
+        maxval = which.max(Y_val)
+        minval = which.min(Y_val)
+        movement = ifelse(maxval < minval,  "L", "R")
+        move = append(move, movement) %>% matrix() %>% na.omit()
+        
+      }
+    }
+    sd_signal = rbind(sd_signal, c(midpoint, sd))
+    lower_interval = lower_interval + increment %>% floor()
+    
+    }
+
+movement = move %>% tail( n = max(nrow(event_time_interval))) %>% as.character()
+event_time_interval = event_time_interval[,-1]
+return(list(event_time_interval = event_time_interval, movement = movement))
+
+}
+## end function
+sec_test_eye_movement_test = eye_movement_sd(wave_file_short$RLR_z2.wav)
+
+```
+
+### Arguments in the Function
+
+To build a classification rule in a moving window, a function that takes in a wave file input used to set a window size to be equalled the sample rate of waves or equivalently, the number of observations per second. This was subsequently used to make the increment for the distance of the window moving from its starting position to it's next one. To replicate the moving window, it is essential for the increments to be smaller than the actual window size. Another argument that the function takes in in the threshold, which was set to 400, that is used to define whether an event has occurred by comparing it to the standard deviation inside of each window to detect eye movement.
+
+Outside of the arguments, other variables such as the 'xtime', 'Y', 'max_time', and 'lower_interval' were created which respectively corresponds to the time (in seconds) of the wave file, the recordings in the left channel which is the maximum time value and the starting number of observation (which is used as a lower interval). Other variables that were created contained empty values which is saved for appending values from the moving windows. Here, a variable used for detecting a new event called 'expected_row' was initialised and was set to equal to 0.
+
+### Inside the moving window
+
+### While loop
+
+The moving window was implemented in a while loop where the first upper interval is equalled to the lower_interval variable plus the window size. At the end of each loop, the increment is added to the lower_interval value. For example, as the window size is 10000 for all wave files, thus making the increment equalling 2000, in the first loop the intervals that are scanned through is from 1 to 10001. Then once the interval is updated again, it will go from 2001 to 12001 and so on. The while loop that keeps on repeating until the maximum time value is greater than the current lower endpoint of a window plus the window size.
+
+### First if statement
+
+During each loop, the standard deviation of the Y values is taken from the interval and compares it to the threshold that was set to determine whether there is a movement. As eye movements happens when the standard deviation is bigger than the threshold, an if statement was made to record the interval. In this statement, the upper and lower intervals were added by rows to the 'event_time_interval' matrix, which was initialized outside of the while loop under the column names of start and stop. Then it was compared to the previous loop using the lag() and first(). Specifically, checking to see whether the start of the current interval overlapped the previous loop interval. If there was any overlapping, the 'event_time_interval' is updated to include the earliest start interval and the lasted stop value. Continuing with our examples, if both the first and second loop had detected movement, then the 'event_time_interval' will store the 1 as the start value and 12001 as the stop interval. If there is no overlapping, another row is created to include the next eye movement. Creating another row also updates an 'end_nrow' variable.
+
+### Second if statement
+
+Because it's a moving window, once an eye movement is detected, the stop times is unclear, thus it requires another if statement to gather the interval times once the window has detected another start of events. In the second if statement, which is only activated if there is a new row added to the 'event_time_interval' by comparing the number of rows in the 'event_time_interval' to see if it's equal to the 'expected_row' variable. In the first loop, as the 'expected_row' value starts with 0, as soon as there is an interval added, the if statements takes the stop and start values and binds it to another variable called 'int_value', which is the value of a whole event.
+
+### Nested For loop
+
+A nested for loop was created detect the left or right movement for each interval in 'int_value' for when it's updated with a new row. The left and right signals were detected by comparing the indexes of the maximum values and the minimum values. An eye movement would be labelled as left if the maximum value index is smaller the index of the minimum value. Otherwise, the signal would be labelled as right if the index of minimum value is smaller than the index of the max value. Thus it will output the movement for each interval and return it as along the event_time_interval.
+
+## Accuracy Metric
+
+```{r, warning = FALSE, message=FALSE}
+library(RecordLinkage)
+
+predicted_values = data.frame()
+
+for (i in 1:length(wave_file_short)) {
+  wave_file = wave_file_short[[i]]
+  predicted_move = eye_movement_sd(wave_file)$movement
+  combined_moves = paste(predicted_move, collapse = "")
+  predicted_values = rbind(predicted_values, combined_moves)
+  }
+
+my_result = c()
+for (i in 1:nrow(predicted_values)){
+  r <- paste(predicted_values[i,1], sep = ", ")
+  my_result = append(my_result, r)
+}
+
+my_result = my_result %>% list()
+
+accuracy_df = data.frame()
+
+for (i in 1:length(Y_lab[[1]])){
+  similiarity = stringdist(Y_lab[[1]][i], my_result[[1]][i], method = "jw")
+  accuracy_df = rbind(accuracy_df, similiarity)
+
+}
+accuracy_df = accuracy_df %>% na.omit() 
+accuracy_df$file = "Original"
+colnames(accuracy_df)[1] = c("JW similarity")
+
+p = ggplot(data = accuracy_df, aes(y = `JW similarity`, x = file, color = file)) + geom_boxplot() + geom_jitter(position=position_jitter(0.2)) + ylab("Jaro-Winkler Similarity Score") +ylim(0,1) +ggtitle("An interactive boxplot of the classifier's similarity score") + xlab("Classifier")
+ggplotly(p)
+```
+
+Accuracy was measured using string distance by following Jaro-Winkler (JW) method, which measures the similarity between the predicted and labelled waves. Jaro-Winkler was chosen as it takes into account the number of matching characters, the length of each prediction and the positions of each prediction. Moreover, Jaro-Winkler similarity falls in between the range of 0-1 making it easy to compare different classification rules. 
+
+There were a few points with a similarity of 1, but the boxplot shows that the median similarity is approximately 0.31. In general, 50% of the points were placed within an accuracy of 0.11 to 1, therefore the variance for this classification rule for wave files with a length of 3 is fairly wide.
+
+## Accuracy on Five other Classification Rules
+
+### Classification Changes 
+
+Five other different classification rule includes: Increasing increments by dividing the window size with 3 and decreasing increments by dividing the window size by 7. Increasing and decreasing the threshold levels for detecting an event from the original level of 400 to 800 and 300, respectively. The last classification rule changed from using the standard deviation to using zero-crossing where an event was identified if it had less than 20 zero-crossing per window.
+
+```{r, warning=FALSE}
+eye_movement_sd_1 = function(waveSeq,  
+                        window_size = waveSeq@samp.rate,
+                        increment = window_size/5,
+                        threshold_events = 800){
+
+Y = waveSeq@left
+xtime = seq_len(length(waveSeq@left))/waveSeq@samp.rate
+sd_signal = c()
+event_time_interval = matrix(c(NA, NA), ncol = 2) 
+# colnames(event_time_interval) = c("start", "stop")
+lower_interval = 1
+max_time = max(xtime)*window_size
+movement_LR = c()
+expecteded_row = 0 #number of rows in overlapped table
+int_value = tibble()
+stop_value = tibble()
+start_value = tibble()
+move = matrix()
+end_nrow = 0
+
+
+while(max_time > lower_interval + window_size) {
+    upper_interval = lower_interval + window_size  %>% floor()#1ms + 1sec = 10001
+    midpoint = (lower_interval + upper_interval)/2
+    Y_subset = Y[lower_interval:upper_interval] 
+    sd = sd(Y_subset)
+    if (sd > threshold_events) {
+        event_time_interval = rbind(event_time_interval, c(stop = upper_interval, start = lower_interval))
+        event_time_interval = event_time_interval %>% data.frame()
+        event_time_interval = event_time_interval %>% na.omit()
+        ##Overlap combined
+        event_time_interval = event_time_interval %>%
+        arrange(start) %>%
+        group_by(g = cumsum(cummax(lag(stop, default = dplyr::first(stop))) < start)) %>%
+        summarise(start = first(start), stop = max(stop))
+        end_nrow = nrow(event_time_interval)
+    }
+    if (end_nrow != expecteded_row) {#Finding a new event 
+      event_time_interval$stop_times <- as.character(event_time_interval$stop)
+      stop_time <- strsplit(event_time_interval$stop_times, " ")
+      stop_value = cbind(stop_time) %>% as.numeric()
+      
+      event_time_interval$start_times <- as.character(event_time_interval$start)
+      start_time <- strsplit(event_time_interval$start_times, " ")
+      start_value = cbind(start_time) %>% as.numeric()
+      int_value = cbind(start_value, stop_value)
+      
+      for (j in 1:max(nrow(int_value))){ #Finding whether it's left or right movement
+        Y_val = Y[int_value[j,1]: int_value[j,2]]
+        maxval = which.max(Y_val)
+        minval = which.min(Y_val)
+        movement = ifelse(maxval < minval,  "L", "R")
+        move = append(move, movement) %>% matrix() %>% na.omit()
+      }
+    expecteded_row = expecteded_row +1  
+    }
+    sd_signal = rbind(sd_signal, c(midpoint, sd))
+    lower_interval = lower_interval + increment %>% floor()
+    
+
+    }
+
+movement = move %>% tail( n = max(nrow(event_time_interval))) %>% as.character()
+event_time_interval = event_time_interval[,-1]
+return(list(event_time_interval = event_time_interval, movement = movement))
+
+}
+## end function
+
+predicted_values_1 = data.frame()
+
+for (i in 1:length(wave_file_short)) {
+  wave_file = wave_file_short[[i]]
+  predicted_move = eye_movement_sd_1(wave_file)$movement
+  combined_moves = paste(predicted_move, collapse = "")
+  predicted_values_1 = rbind(predicted_values_1, combined_moves)
+  }
+
+my_result_1 = c()
+for (i in 1:nrow(predicted_values_1)){
+  r <- paste(predicted_values_1[i,1], sep = ", ")
+  my_result_1 = append(my_result_1, r)
+}
+
+my_result_1 = my_result_1 %>% list()
+accuracy_df_1 = data.frame()
+
+for (i in 1:length(Y_lab[[1]])){
+  dist <- stringdist(Y_lab[[1]][i], my_result_1[[1]][i], method = "jw") 
+  accuracy_df_1 = rbind(accuracy_df_1, dist)
+
+}
+accuracy_df_1 = accuracy_df_1 %>% na.omit() 
+accuracy_df_1$file = "Higher Threshold"
+colnames(accuracy_df_1)[1] = c("JW similarity")
+# 
+# p1 = ggplot(data = accuracy_df_1, aes(y = `Accuracy (%)`, x = file )) + geom_violin() + geom_jitter(position=position_jitter(0.2)) + ylab("String Distance Accuracy (%)") + ylim(0,100)
+# ggplotly(p1)
+
+eye_movement_sd_2 = function(waveSeq,  
+                        window_size = waveSeq@samp.rate,
+                        increment = window_size/3,
+                        threshold_events = 400){
+
+Y = waveSeq@left
+xtime = seq_len(length(waveSeq@left))/waveSeq@samp.rate
+sd_signal = c()
+event_time_interval = matrix(c(NA, NA), ncol = 2) 
+# colnames(event_time_interval) = c("start", "stop")
+lower_interval = 1
+max_time = max(xtime)*window_size
+movement_LR = c()
+expecteded_row = 0 #number of rows in overlapped table
+int_value = tibble()
+stop_value = tibble()
+start_value = tibble()
+move = matrix()
+end_nrow = 0
+
+
+while(max_time > lower_interval + window_size) {
+    upper_interval = lower_interval + window_size  %>% floor()#1ms + 1sec = 10001
+    midpoint = (lower_interval + upper_interval)/2
+    Y_subset = Y[lower_interval:upper_interval] 
+    sd = sd(Y_subset)
+    if (sd > threshold_events) {
+        event_time_interval = rbind(event_time_interval, c(stop = upper_interval, start = lower_interval))
+        event_time_interval = event_time_interval %>% data.frame()
+        event_time_interval = event_time_interval %>% na.omit()
+        ##Overlap combined
+        event_time_interval = event_time_interval %>%
+        arrange(start) %>%
+        group_by(g = cumsum(cummax(lag(stop, default = dplyr::first(stop))) < start)) %>%
+        summarise(start = first(start), stop = max(stop))
+        end_nrow = nrow(event_time_interval)
+    }
+    if (end_nrow != expecteded_row) {#Finding a new event 
+      event_time_interval$stop_times <- as.character(event_time_interval$stop)
+      stop_time <- strsplit(event_time_interval$stop_times, " ")
+      stop_value = cbind(stop_time) %>% as.numeric()
+      
+      event_time_interval$start_times <- as.character(event_time_interval$start)
+      start_time <- strsplit(event_time_interval$start_times, " ")
+      start_value = cbind(start_time) %>% as.numeric()
+      int_value = cbind(start_value, stop_value)
+      
+      for (j in 1:max(nrow(int_value))){ #Finding whether it's left or right movement
+        Y_val = Y[int_value[j,1]: int_value[j,2]]
+        maxval = which.max(Y_val)
+        minval = which.min(Y_val)
+        movement = ifelse(maxval < minval,  "L", "R")
+        move = append(move, movement) %>% matrix() %>% na.omit()
+      }
+    expecteded_row = expecteded_row +1  
+    }
+    sd_signal = rbind(sd_signal, c(midpoint, sd))
+    lower_interval = lower_interval + increment %>% floor()
+    
+
+    }
+
+movement = move %>% tail( n = max(nrow(event_time_interval))) %>% as.character()
+event_time_interval = event_time_interval[,-1]
+return(list(event_time_interval = event_time_interval, movement = movement))
+
+}
+## end function
+
+predicted_values_2 = data.frame()
+
+for (i in 1:length(wave_file_short)) {
+  wave_file = wave_file_short[[i]]
+  predicted_move = eye_movement_sd_2(wave_file)$movement
+  combined_moves = paste(predicted_move, collapse = "")
+  predicted_values_2 = rbind(predicted_values_2, combined_moves)
+  }
+
+my_result_2 = c()
+for (i in 1:nrow(predicted_values_2)){
+  r <- paste(predicted_values_2[i,1], sep = ", ")
+  my_result_2 = append(my_result_2, r)
+}
+
+my_result_2 = my_result_2 %>% list()
+accuracy_df_2 = data.frame()
+
+for (i in 1:length(Y_lab[[1]])){
+   dist <- stringdist(Y_lab[[1]][i], my_result_2[[1]][i], method = "jw") 
+  accuracy_df_2 = rbind(accuracy_df_2, dist)
+
+}
+accuracy_df_2 = accuracy_df_2 %>% na.omit() 
+accuracy_df_2$file = "Larger Increments"
+colnames(accuracy_df_2)[1] = c("JW similarity")
+
+# p2 = ggplot(data = accuracy_df_2, aes(y = `Accuracy (%)`, x = file )) + geom_violin() + geom_jitter(position=position_jitter(0.2)) + ylab("String Distance Accuracy (%)") + ylim(0,100)
+# ggplotly(p2)
+
+eye_movement_sd_3 = function(waveSeq,  
+                        window_size = waveSeq@samp.rate,
+                        increment = window_size/8,
+                        threshold_events = 400){
+
+Y = waveSeq@left
+xtime = seq_len(length(waveSeq@left))/waveSeq@samp.rate
+sd_signal = c()
+event_time_interval = matrix(c(NA, NA), ncol = 2) 
+# colnames(event_time_interval) = c("start", "stop")
+lower_interval = 1
+max_time = max(xtime)*window_size
+movement_LR = c()
+expecteded_row = 0 #number of rows in overlapped table
+int_value = tibble()
+stop_value = tibble()
+start_value = tibble()
+move = matrix()
+end_nrow = 0
+
+
+while(max_time > lower_interval + window_size) {
+    upper_interval = lower_interval + window_size  %>% floor()#1ms + 1sec = 10001
+    midpoint = (lower_interval + upper_interval)/2
+    Y_subset = Y[lower_interval:upper_interval] 
+    sd = sd(Y_subset)
+    if (sd > threshold_events) {
+        event_time_interval = rbind(event_time_interval, c(stop = upper_interval, start = lower_interval))
+        event_time_interval = event_time_interval %>% data.frame()
+        event_time_interval = event_time_interval %>% na.omit()
+        ##Overlap combined
+        event_time_interval = event_time_interval %>%
+        arrange(start) %>%
+        group_by(g = cumsum(cummax(lag(stop, default = dplyr::first(stop))) < start)) %>%
+        summarise(start = first(start), stop = max(stop))
+        end_nrow = nrow(event_time_interval)
+    }
+    if (end_nrow != expecteded_row) {#Finding a new event 
+      event_time_interval$stop_times <- as.character(event_time_interval$stop)
+      stop_time <- strsplit(event_time_interval$stop_times, " ")
+      stop_value = cbind(stop_time) %>% as.numeric()
+      
+      event_time_interval$start_times <- as.character(event_time_interval$start)
+      start_time <- strsplit(event_time_interval$start_times, " ")
+      start_value = cbind(start_time) %>% as.numeric()
+      int_value = cbind(start_value, stop_value)
+      
+      for (j in 1:max(nrow(int_value))){ #Finding whether it's left or right movement
+        Y_val = Y[int_value[j,1]: int_value[j,2]]
+        maxval = which.max(Y_val)
+        minval = which.min(Y_val)
+        movement = ifelse(maxval < minval,  "L", "R")
+        move = append(move, movement) %>% matrix() %>% na.omit()
+      }
+    expecteded_row = expecteded_row +1  
+    }
+    sd_signal = rbind(sd_signal, c(midpoint, sd))
+    lower_interval = lower_interval + increment %>% floor()
+    
+
+    }
+
+movement = move %>% tail( n = max(nrow(event_time_interval))) %>% as.character()
+event_time_interval = event_time_interval[,-1]
+return(list(event_time_interval = event_time_interval, movement = movement))
+
+}
+## end function
+
+predicted_values_3 = data.frame()
+
+for (i in 1:length(wave_file_short)) {
+  wave_file = wave_file_short[[i]]
+  predicted_move = eye_movement_sd_3(wave_file)$movement
+  combined_moves = paste(predicted_move, collapse = "")
+  predicted_values_3 = rbind(predicted_values_3, combined_moves)
+  }
+
+my_result_3 = c()
+for (i in 1:nrow(predicted_values_3)){
+  r <- paste(predicted_values_3[i,1], sep = ", ")
+  my_result_3 = append(my_result_3, r)
+}
+
+my_result_3 = my_result_3 %>% list()
+accuracy_df_3 = data.frame()
+
+for (i in 1:length(Y_lab[[1]])){
+   dist <- stringdist(Y_lab[[1]][i], my_result_3[[1]][i], method = "jw") 
+  accuracy_df_3 = rbind(accuracy_df_3, dist)
+
+}
+accuracy_df_3 = accuracy_df_3 %>% na.omit() 
+accuracy_df_3$file = "Smaller Increments"
+colnames(accuracy_df_3)[1] = c("JW similarity")
+
+# p3 = ggplot(data = accuracy_df_3, aes(y = `Accuracy (%)`, x = file )) + geom_violin() + geom_jitter(position=position_jitter(0.2)) + ylab("String Distance Accuracy (%)") + ylim(0,100)
+# ggplotly(p3)
+
+eye_movement_sd_4 = function(waveSeq,  
+                        window_size = waveSeq@samp.rate,
+                        increment = window_size/5,
+                        threshold_events = 300){
+
+Y = waveSeq@left
+xtime = seq_len(length(waveSeq@left))/waveSeq@samp.rate
+sd_signal = c()
+event_time_interval = matrix(c(NA, NA), ncol = 2) 
+# colnames(event_time_interval) = c("start", "stop")
+lower_interval = 1
+max_time = max(xtime)*window_size
+movement_LR = c()
+expecteded_row = 0 #number of rows in overlapped table
+int_value = tibble()
+stop_value = tibble()
+start_value = tibble()
+move = matrix()
+end_nrow = 0
+
+
+while(max_time > lower_interval + window_size) {
+    upper_interval = lower_interval + window_size  %>% floor()#1ms + 1sec = 10001
+    midpoint = (lower_interval + upper_interval)/2
+    Y_subset = Y[lower_interval:upper_interval] 
+    sd = sd(Y_subset)
+    if (sd > threshold_events) {
+        event_time_interval = rbind(event_time_interval, c(stop = upper_interval, start = lower_interval))
+        event_time_interval = event_time_interval %>% data.frame()
+        event_time_interval = event_time_interval %>% na.omit()
+        ##Overlap combined
+        event_time_interval = event_time_interval %>%
+        arrange(start) %>%
+        group_by(g = cumsum(cummax(lag(stop, default = dplyr::first(stop))) < start)) %>%
+        summarise(start = first(start), stop = max(stop))
+        end_nrow = nrow(event_time_interval)
+    }
+    if (end_nrow != expecteded_row) {#Finding a new event 
+      event_time_interval$stop_times <- as.character(event_time_interval$stop)
+      stop_time <- strsplit(event_time_interval$stop_times, " ")
+      stop_value = cbind(stop_time) %>% as.numeric()
+      
+      event_time_interval$start_times <- as.character(event_time_interval$start)
+      start_time <- strsplit(event_time_interval$start_times, " ")
+      start_value = cbind(start_time) %>% as.numeric()
+      int_value = cbind(start_value, stop_value)
+      
+      for (j in 1:max(nrow(int_value))){ #Finding whether it's left or right movement
+        Y_val = Y[int_value[j,1]: int_value[j,2]]
+        maxval = which.max(Y_val)
+        minval = which.min(Y_val)
+        movement = ifelse(maxval < minval,  "L", "R")
+        move = append(move, movement) %>% matrix() %>% na.omit()
+      }
+    expecteded_row = expecteded_row +1  
+    }
+    sd_signal = rbind(sd_signal, c(midpoint, sd))
+    lower_interval = lower_interval + increment %>% floor()
+    
+
+    }
+
+movement = move %>% tail( n = max(nrow(event_time_interval))) %>% as.character()
+event_time_interval = event_time_interval[,-1]
+return(list(event_time_interval = event_time_interval, movement = movement))
+
+}
+## end function
+
+predicted_values_4 = data.frame()
+
+for (i in 1:length(wave_file_short)) {
+  wave_file = wave_file_short[[i]]
+  predicted_move = eye_movement_sd_4(wave_file)$movement
+  combined_moves = paste(predicted_move, collapse = "")
+  predicted_values_4 = rbind(predicted_values_4, combined_moves)
+  }
+
+my_result_4 = c()
+for (i in 1:nrow(predicted_values_4)){
+  r <- paste(predicted_values_4[i,1], sep = ", ")
+  my_result_4 = append(my_result_4, r)
+}
+
+my_result_4 = my_result_4 %>% list()
+accuracy_df_4 = data.frame()
+
+for (i in 1:length(Y_lab[[1]])){
+  dist <- stringdist(Y_lab[[1]][i], my_result_4[[1]][i], method = "jw") 
+  accuracy_df_4 = rbind(accuracy_df_4, dist)
+
+}
+accuracy_df_4 = accuracy_df_4 %>% na.omit() 
+accuracy_df_4$file = "Lower Threshold"
+colnames(accuracy_df_4)[1] = c("JW similarity")
+# 
+# p4 = ggplot(data = accuracy_df_4, aes(y = `Accuracy (%)`, x = file )) + geom_boxplot() + geom_jitter(position=position_jitter(0.2)) + ylab("String Distance Accuracy (%)") + ylim(0,100)
+# ggplotly(p4)
+
+eye_movement_sd_5 = function(waveSeq,  
+                        window_size = waveSeq@samp.rate,
+                        increment = window_size/5,
+                        threshold_events = 20){
+
+Y = waveSeq@left
+xtime = seq_len(length(waveSeq@left))/waveSeq@samp.rate
+event_time_interval = matrix(c(NA, NA), ncol = 2) 
+sd_signal = c()
+# colnames(event_time_interval) = c("start", "stop")
+lower_interval = 1
+max_time = max(xtime)*window_size
+movement_LR = c()
+expecteded_row = 0 #number of rows in overlapped table
+int_value = tibble()
+stop_value = tibble()
+start_value = tibble()
+move = matrix()
+end_nrow = 0
+
+
+while(max_time > lower_interval + window_size) {
+    upper_interval = lower_interval + window_size  %>% floor()#1ms + 1sec = 10001
+    midpoint = (lower_interval + upper_interval)/2
+    Y_subset = Y[lower_interval:upper_interval] 
+    zc =  sum(Y_subset[1:(length(Y_subset) - 1)] * Y_subset[2:(length(Y_subset))] <= 0)
+    if (zc < threshold_events) {
+        event_time_interval = rbind(event_time_interval, c(stop = upper_interval, start = lower_interval))
+        event_time_interval = event_time_interval %>% data.frame()
+        event_time_interval = event_time_interval %>% na.omit()
+        ##Overlap combined
+        event_time_interval = event_time_interval %>%
+        arrange(start) %>%
+        group_by(g = cumsum(cummax(lag(stop, default = dplyr::first(stop))) < start)) %>%
+        summarise(start = first(start), stop = max(stop))
+        end_nrow = nrow(event_time_interval)
+    }
+    if (end_nrow != expecteded_row) {#Finding a new event 
+      event_time_interval$stop_times <- as.character(event_time_interval$stop)
+      stop_time <- strsplit(event_time_interval$stop_times, " ")
+      stop_value = cbind(stop_time) %>% as.numeric()
+      
+      event_time_interval$start_times <- as.character(event_time_interval$start)
+      start_time <- strsplit(event_time_interval$start_times, " ")
+      start_value = cbind(start_time) %>% as.numeric()
+      int_value = cbind(start_value, stop_value)
+      
+      for (j in 1:max(nrow(int_value))){ #Finding whether it's left or right movement
+        Y_val = Y[int_value[j,1]: int_value[j,2]]
+        maxval = which.max(Y_val)
+        minval = which.min(Y_val)
+        movement = ifelse(maxval < minval,  "L", "R")
+        move = append(move, movement) %>% matrix() %>% na.omit()
+      }
+    expecteded_row = expecteded_row +1  
+    }
+    sd_signal = rbind(sd_signal, c(midpoint, max))
+    lower_interval = lower_interval + increment %>% floor()
+    
+
+    }
+
+movement = move %>% tail(n = max(nrow(event_time_interval))) %>% as.character()
+event_time_interval = event_time_interval[,-1]
+return(list(event_time_interval = event_time_interval, movement = movement))
+
+}
+## end function
+
+predicted_values_5 = data.frame()
+
+for (i in 1:length(wave_file_short)) {
+  wave_file = wave_file_short[[i]]
+  predicted_move = eye_movement_sd_5(wave_file)$movement
+  combined_moves = paste(predicted_move, collapse = "")
+  predicted_values_5 = rbind(predicted_values_5, combined_moves)
+  }
+
+my_result_5 = c()
+for (i in 1:nrow(predicted_values_5)){
+  r <- paste(predicted_values_5[i,1], sep = ", ")
+  my_result_5 = append(my_result_5, r)
+}
+
+my_result_5 = my_result_5 %>% list()
+accuracy_df_5 = data.frame()
+
+for (i in 1:length(Y_lab[[1]])){
+   dist <- stringdist(Y_lab[[1]][i], my_result_5[[1]][i], method = "jw") 
+  accuracy_df_5 = rbind(accuracy_df_5, dist)
+
+}
+accuracy_df_5 = accuracy_df_5 %>% na.omit() 
+accuracy_df_5$file = "Using Zero Crossing"
+colnames(accuracy_df_5)[1] = c("JW similarity")
+# 
+#p5 = ggplot(data = accuracy_df_5, aes(y = `Accuracy (%)`, x = file )) + geom_violin() + geom_jitter(position=position_jitter(0.2)) + ylab("String Distance Accuracy (%)") + ylim(0,100)
+#ggplotly(p5)
+
+all_accuracy = c()
+all_accuracy = all_accuracy %>% rbind(accuracy_df, accuracy_df_1, accuracy_df_2, accuracy_df_3, accuracy_df_4, accuracy_df_5)
+all_accuracy$file<- factor(all_accuracy$file, levels = c("Original", "Larger Increments", "Smaller Increments", "Higher Threshold", "Lower Threshold", "Using Zero Crossing"))
+p = ggplot(data = all_accuracy, aes(y = `JW similarity`, x = file, color = file )) + geom_boxplot() + geom_jitter(position=position_jitter(0.2),ahlpa = 0.4) +
+  scale_x_discrete(guide = guide_axis(angle = 45))  + ylab("Jaro-Winkler Similarity Score")  + xlab("Classifier") + labs(color = "Classifier") + ylim(0,1) + ggtitle("A boxplot on similarity scores for different classification rules")
+
+p = ggplotly(p)
+p = layout(p, xaxis = list(tickangle = -45))
+p
+```
+
+### Graph Analysis
+
+A boxplot plot was selected to showed the distribution of Jaro-Winkler (JW) similarity between length 3 files. We can see that having smaller increments performed better than larger increments, but having an increment too small also negatively impacts the JW similarity score. Moreover, having a lower threshold seems to be better than a higher threshold as there was less variance with a higher similarity score, however, it seems the original classification rule performed the best according to the Jaro-Winkler method as it had the highest median score of 0.31.
+
+## Performance of Original Classifier on Different Wave Sequence
+
+```{r, warning=FALSE}
+eye_movement_sd = function(waveSeq,  
+                        window_size = waveSeq@samp.rate,
+                        increment = window_size/5,
+                        threshold_events = 400){
+
+Y = waveSeq@left
+xtime = seq_len(length(waveSeq@left))/waveSeq@samp.rate
+sd_signal = c()
+event_time_interval = matrix(c(NA, NA), ncol = 2) 
+# colnames(event_time_interval) = c("start", "stop")
+lower_interval = 1
+max_time = max(xtime)*window_size
+movement_LR = c()
+expecteded_row = 0 #number of rows in overlapped table
+int_value = tibble()
+stop_value = tibble()
+start_value = tibble()
+move = matrix()
+end_nrow = 0
+
+
+while(max_time > lower_interval + window_size) {
+    upper_interval = lower_interval + window_size  %>% floor()#1ms + 1sec = 10001
+    midpoint = (lower_interval + upper_interval)/2
+    Y_subset = Y[lower_interval:upper_interval] 
+    sd = sd(Y_subset)
+    if (sd > threshold_events) {
+        event_time_interval = rbind(event_time_interval, c(stop = upper_interval, start = lower_interval))
+        event_time_interval = event_time_interval %>% data.frame()
+        event_time_interval = event_time_interval %>% na.omit()
+        ##Overlap combined
+        event_time_interval = event_time_interval %>%
+        arrange(start) %>%
+        group_by(g = cumsum(cummax(lag(stop, default = dplyr::first(stop))) < start)) %>%
+        summarise(start = first(start), stop = max(stop))
+        end_nrow = nrow(event_time_interval)
+    }
+    if (end_nrow != expecteded_row) {#Finding a new event 
+      event_time_interval$stop_times <- as.character(event_time_interval$stop)
+      stop_time <- strsplit(event_time_interval$stop_times, " ")
+      stop_value = cbind(stop_time) %>% as.numeric()
+      
+      event_time_interval$start_times <- as.character(event_time_interval$start)
+      start_time <- strsplit(event_time_interval$start_times, " ")
+      start_value = cbind(start_time) %>% as.numeric()
+      int_value = cbind(start_value, stop_value)
+      
+      for (j in 1:max(nrow(int_value))){ #Finding whether it's left or right movement
+        Y_val = Y[int_value[j,1]: int_value[j,2]]
+        maxval = which.max(Y_val)
+        minval = which.min(Y_val)
+        movement = ifelse(maxval < minval,  "L", "R")
+        move = append(move, movement) %>% matrix() %>% na.omit()
+        
+      }
+    }
+    sd_signal = rbind(sd_signal, c(midpoint, sd))
+    lower_interval = lower_interval + increment %>% floor()
+    
+    }
+
+movement = move %>% tail( n = max(nrow(event_time_interval))) %>% as.character()
+event_time_interval = event_time_interval[,-1]
+return(list(event_time_interval = event_time_interval, movement = movement))
+## end function
+}
+##Lenght 3 Files
+predicted_values_3l = data.frame()
+
+for (i in 1:length(wave_file_short)) {
+  wave_file = wave_file_short[[i]]
+  predicted_move = eye_movement_sd(wave_file)$movement
+  combined_moves = paste(predicted_move, collapse = "")
+  predicted_values_3l = rbind(predicted_values_3l, combined_moves)
+  }
+
+my_result_3l = c()
+for (i in 1:nrow(predicted_values_3l)){
+  r <- paste(predicted_values_3l[i,1], sep = ", ")
+  my_result_3l = append(my_result_3l, r)
+}
+
+my_result_3l = my_result_3l %>% list()
+accuracy_df_3l = data.frame()
+
+for (i in 1:length(Y_lab[[1]])){
+   dist <- stringdist(Y_lab[[1]][i], my_result_3l[[1]][i], method = "jw") 
+  accuracy_df_3l = rbind(accuracy_df_3l, dist)
+
+}
+accuracy_df_3l = accuracy_df_3l %>% na.omit() 
+accuracy_df_3l$file = "Length 3"
+colnames(accuracy_df_3l)[1] = c("Accuracy (%)")
+
+## Length 8 files
+
+predicted_values_8l = data.frame()
+
+for (i in 1:length(wave_file_med)) {
+  wave_file = wave_file_med[[i]]
+  predicted_move = eye_movement_sd(wave_file)$movement
+  combined_moves = paste(predicted_move, collapse = "")
+  predicted_values_8l = rbind(predicted_values_8l, combined_moves)
+  }
+
+my_result_8l = c()
+for (i in 1:nrow(predicted_values_8l)){
+  r <- paste(predicted_values_8l[i,1], sep = ", ")
+  my_result_8l = append(my_result_8l, r)
+}
+
+my_result_8l = my_result_8l %>% list()
+accuracy_df_8l = data.frame()
+
+for (i in 1:length(Y_lab_8[[1]])){
+   dist <- stringdist(Y_lab_8[[1]][i], my_result_8l[[1]][i], method = "jw") 
+    accuracy = (1-dist)*100
+  accuracy_df_8l = rbind(accuracy_df_8l, dist)
+
+}
+accuracy_df_8l = accuracy_df_8l %>% na.omit() 
+accuracy_df_8l$file = "Length 8"
+colnames(accuracy_df_8l)[1] = c("Accuracy (%)")
+
+## Lenght 20
+predicted_values_20l = data.frame()
+
+for (i in 1:length(wave_file_long)) {
+  wave_file = wave_file_long[[i]]
+  predicted_move = eye_movement_sd(wave_file)$movement
+  combined_moves = paste(predicted_move, collapse = "")
+  predicted_values_20l = rbind(predicted_values_20l, combined_moves)
+  }
+
+my_result_20l = c()
+for (i in 1:nrow(predicted_values_20l)){
+  r <- paste(predicted_values_20l[i,1], sep = ", ")
+  my_result_20l = append(my_result_20l, r)
+}
+
+my_result_20l = my_result_20l %>% list()
+accuracy_df_20l = data.frame()
+
+for (i in 1:length(Y_lab_20[[1]])){
+  dist <- stringdist(Y_lab_20[[1]][i], my_result_20l[[1]][i], method = "jw") 
+  accuracy_df_20l = rbind(accuracy_df_20l, dist)
+
+}
+accuracy_df_20l = accuracy_df_20l %>% na.omit() 
+accuracy_df_20l$file = "Length 20"
+colnames(accuracy_df_20l)[1] = c("Accuracy (%)")
+
+length_accuracy = c()
+length_accuracy = length_accuracy %>% rbind(accuracy_df_3l, accuracy_df_8l, accuracy_df_20l)
+length_accuracy$file<- factor(length_accuracy$file, levels = c("Length 3", "Length 8", "Length 20"))
+pl = ggplot(data = length_accuracy, aes(y = `Accuracy (%)`, x = file, color = file )) + geom_boxplot() + geom_jitter(position=position_jitter(0.2)) + ylab("Jaro-Winkler Similarity Score Score")  + xlab("Wave Length") + labs(color = "Wave Length") + theme(legend.position = "bottom") + ylim(0,1) + ggtitle("An interactive boxplox showing classifier perfomance on different sequence length")
+pl = ggplotly(pl)
+pl
+
+```
+From the graph above, it looks like the similarity score performed best for wave files of length 3 and significantly deteriorated in performance when the wave length files were increased to length 8 and 20. This probably came from the fact that as more events were being missed, the events that were identified which could have been correctly classified are in the wrong position thus impacting the similarity score. Interestingly, the JW similarity score for length 8 wave files had a lower accuracy of 0.14 compared to the length 20 wave sequence of 0.16. Moreover, as the length of waves sequences increases, the variance in the similarity score decreases, due to a smaller sample number.
